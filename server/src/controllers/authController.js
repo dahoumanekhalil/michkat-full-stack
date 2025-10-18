@@ -2,6 +2,8 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const emailService = require('../services/emailService');
 
 const prisma = new PrismaClient();
 
@@ -597,6 +599,245 @@ exports.changePassword = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء تغيير كلمة المرور',
+      error: error.message
+    });
+  }
+};
+
+// =============================================
+// Request Password Reset
+// =============================================
+exports.requestPasswordReset = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    // البحث عن المستخدم
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: { profile: true }
+    });
+
+    // لأسباب أمنية، نعيد نفس الرسالة حتى لو لم يكن المستخدم موجوداً
+    if (!user) {
+      return res.json({
+        success: true,
+        message: 'إذا كان هذا البريد مسجلاً، ستتلقى رابط إعادة التعيين'
+      });
+    }
+
+    // التحقق من حالة الحساب
+    if (user.status !== 'ACTIVE') {
+      return res.status(403).json({
+        success: false,
+        message: 'حسابك غير نشط. يرجى التواصل مع الدعم'
+      });
+    }
+
+    // توليد رمز عشوائي آمن
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    
+    // تشفير الرمز قبل حفظه في قاعدة البيانات
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(resetToken)
+      .digest('hex');
+
+    // انتهاء صلاحية الرمز بعد ساعة واحدة
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    // حذف أي رموز قديمة لنفس البريد
+    await prisma.passwordResetToken.deleteMany({
+      where: { email }
+    });
+
+    // حفظ الرمز الجديد
+    await prisma.passwordResetToken.create({
+      data: {
+        email,
+        token: hashedToken,
+        expiresAt,
+        used: false
+      }
+    });
+
+    // إرسال البريد الإلكتروني
+    const userName = user.profile 
+      ? `${user.profile.firstName} ${user.profile.lastName}` 
+      : email;
+
+    await emailService.sendPasswordResetEmail(email, resetToken, userName);
+
+    res.json({
+      success: true,
+      message: 'إذا كان هذا البريد مسجلاً، ستتلقى رابط إعادة التعيين'
+    });
+
+  } catch (error) {
+    console.error('Request password reset error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء معالجة طلبك',
+      error: error.message
+    });
+  }
+};
+
+// =============================================
+// Verify Reset Token
+// =============================================
+exports.verifyResetToken = async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'الرمز مطلوب'
+      });
+    }
+
+    // تشفير الرمز للمقارنة
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    // البحث عن الرمز
+    const resetToken = await prisma.passwordResetToken.findFirst({
+      where: {
+        token: hashedToken,
+        used: false,
+        expiresAt: { gte: new Date() }
+      }
+    });
+
+    if (!resetToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'رمز غير صالح أو منتهي الصلاحية'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'الرمز صالح',
+      data: {
+        email: resetToken.email
+      }
+    });
+
+  } catch (error) {
+    console.error('Verify reset token error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء التحقق من الرمز',
+      error: error.message
+    });
+  }
+};
+
+// =============================================
+// Reset Password
+// =============================================
+exports.resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'الرمز وكلمة المرور الجديدة مطلوبان'
+      });
+    }
+
+    // التحقق من طول كلمة المرور
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل'
+      });
+    }
+
+    // تشفير الرمز للمقارنة
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    // البحث عن الرمز
+    const resetToken = await prisma.passwordResetToken.findFirst({
+      where: {
+        token: hashedToken,
+        used: false,
+        expiresAt: { gte: new Date() }
+      }
+    });
+
+    if (!resetToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'رمز غير صالح أو منتهي الصلاحية'
+      });
+    }
+
+    // البحث عن المستخدم
+    const user = await prisma.user.findUnique({
+      where: { email: resetToken.email }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'المستخدم غير موجود'
+      });
+    }
+
+    // تشفير كلمة المرور الجديدة
+    const bcrypt = require('bcryptjs');
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    // تحديث كلمة المرور
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        passwordChangedAt: new Date()
+      }
+    });
+
+    // تعيين الرمز كمستخدم
+    await prisma.passwordResetToken.update({
+      where: { id: resetToken.id },
+      data: { used: true }
+    });
+
+    // إبطال جميع refresh tokens (فرض تسجيل دخول جديد)
+    await prisma.refreshToken.updateMany({
+      where: { userId: user.id },
+      data: { isRevoked: true }
+    });
+
+    // تسجيل الحدث
+    await prisma.loginHistory.create({
+      data: {
+        userId: user.id,
+        success: true,
+        ipAddress: req.ip || req.connection.remoteAddress,
+        userAgent: req.headers['user-agent'],
+        loginAt: new Date()
+      }
+    }).catch(err => console.error('Failed to log password reset:', err));
+
+    res.json({
+      success: true,
+      message: 'تم إعادة تعيين كلمة المرور بنجاح. يمكنك الآن تسجيل الدخول'
+    });
+
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء إعادة تعيين كلمة المرور',
       error: error.message
     });
   }

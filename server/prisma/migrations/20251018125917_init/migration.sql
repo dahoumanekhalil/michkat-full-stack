@@ -1,11 +1,3 @@
-/*
-  Warnings:
-
-  - The primary key for the `users` table will be changed. If it partially fails, the table could be left without primary key constraint.
-  - You are about to drop the column `name` on the `users` table. All the data in the column will be lost.
-  - The `role` column on the `users` table would be dropped and recreated. This will lead to data loss if there is data in the column.
-
-*/
 -- CreateEnum
 CREATE TYPE "UserRole" AS ENUM ('CUSTOMER', 'ADMIN', 'SUPER_ADMIN', 'MODERATOR');
 
@@ -27,19 +19,21 @@ CREATE TYPE "ProfileVisibility" AS ENUM ('PUBLIC', 'PRIVATE', 'FRIENDS_ONLY');
 -- CreateEnum
 CREATE TYPE "AdminAction" AS ENUM ('CREATE', 'UPDATE', 'DELETE', 'VIEW', 'APPROVE', 'REJECT', 'SUSPEND', 'ACTIVATE', 'EXPORT', 'IMPORT', 'CONFIGURE', 'LOGIN', 'LOGOUT');
 
--- AlterTable
-ALTER TABLE "users" DROP CONSTRAINT "users_pkey",
-DROP COLUMN "name",
-ADD COLUMN     "deletedAt" TIMESTAMP(3),
-ADD COLUMN     "lastLogin" TIMESTAMP(3),
-ADD COLUMN     "passwordChangedAt" TIMESTAMP(3),
-ADD COLUMN     "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
-ALTER COLUMN "id" DROP DEFAULT,
-ALTER COLUMN "id" SET DATA TYPE TEXT,
-DROP COLUMN "role",
-ADD COLUMN     "role" "UserRole" NOT NULL DEFAULT 'CUSTOMER',
-ADD CONSTRAINT "users_pkey" PRIMARY KEY ("id");
-DROP SEQUENCE "users_id_seq";
+-- CreateTable
+CREATE TABLE "users" (
+    "id" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "password" TEXT NOT NULL,
+    "role" "UserRole" NOT NULL DEFAULT 'CUSTOMER',
+    "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
+    "lastLogin" TIMESTAMP(3),
+    "passwordChangedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "deletedAt" TIMESTAMP(3),
+
+    CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateTable
 CREATE TABLE "user_profiles" (
@@ -88,6 +82,9 @@ CREATE TABLE "refresh_tokens" (
     "isRevoked" BOOLEAN NOT NULL DEFAULT false,
     "userAgent" TEXT,
     "ipAddress" TEXT,
+    "deviceType" TEXT,
+    "browser" TEXT,
+    "operatingSystem" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -97,7 +94,7 @@ CREATE TABLE "refresh_tokens" (
 -- CreateTable
 CREATE TABLE "login_history" (
     "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
+    "userId" TEXT,
     "success" BOOLEAN NOT NULL,
     "ipAddress" TEXT,
     "userAgent" TEXT,
@@ -150,6 +147,18 @@ CREATE TABLE "email_verification_tokens" (
 
     CONSTRAINT "email_verification_tokens_pkey" PRIMARY KEY ("id")
 );
+
+-- CreateIndex
+CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
+
+-- CreateIndex
+CREATE INDEX "users_email_idx" ON "users"("email");
+
+-- CreateIndex
+CREATE INDEX "users_role_idx" ON "users"("role");
+
+-- CreateIndex
+CREATE INDEX "users_status_idx" ON "users"("status");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "user_profiles_userId_key" ON "user_profiles"("userId");
@@ -219,15 +228,6 @@ CREATE INDEX "email_verification_tokens_token_idx" ON "email_verification_tokens
 
 -- CreateIndex
 CREATE INDEX "email_verification_tokens_expiresAt_idx" ON "email_verification_tokens"("expiresAt");
-
--- CreateIndex
-CREATE INDEX "users_email_idx" ON "users"("email");
-
--- CreateIndex
-CREATE INDEX "users_role_idx" ON "users"("role");
-
--- CreateIndex
-CREATE INDEX "users_status_idx" ON "users"("status");
 
 -- AddForeignKey
 ALTER TABLE "user_profiles" ADD CONSTRAINT "user_profiles_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
