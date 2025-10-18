@@ -1,0 +1,293 @@
+// prisma/schema.prisma 
+// This is your Prisma schema file for User Authentication
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================
+// User Model - Main user account information
+// =============================================
+model User {
+  id       String     @id @default(uuid())
+  email    String     @unique
+  password String // Hashed password
+  role     UserRole   @default(CUSTOMER)
+  status   UserStatus @default(ACTIVE)
+
+  // Profile Information
+  profile UserProfile?
+
+  // Preferences
+  preferences UserPreferences?
+
+  // Authentication & Security
+  lastLogin         DateTime?
+  passwordChangedAt DateTime?
+  refreshTokens     RefreshToken[]
+  loginHistory      LoginHistory[]
+
+  // Timestamps
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+// =============================================
+// User Profile - Extended user information
+// =============================================
+model UserProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Personal Information
+  firstName   String
+  lastName    String
+  phone       String?
+  dateOfBirth DateTime?
+  gender      Gender?
+  avatar      String? // URL to profile image
+
+  // Optional Information
+  bio String? @db.Text
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("user_profiles")
+}
+
+// =============================================
+// User Preferences - User settings
+// =============================================
+model UserPreferences {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Language & Theme
+  language Language @default(AR)
+  theme    Theme    @default(LIGHT)
+
+  // Notification Preferences
+  emailNotifications   Boolean @default(true)
+  smsNotifications     Boolean @default(false)
+  pushNotifications    Boolean @default(true)
+  marketingEmails      Boolean @default(false)
+  orderUpdates         Boolean @default(true)
+  newsletterSubscribed Boolean @default(false)
+
+  // Privacy Settings
+  profileVisibility ProfileVisibility @default(PUBLIC)
+  showEmail         Boolean           @default(false)
+  showPhone         Boolean           @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("user_preferences")
+}
+
+// =============================================
+// Refresh Token - For JWT authentication
+// =============================================
+model RefreshToken {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  token     String   @unique @db.Text
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+
+  // Device Information
+  userAgent       String? @db.Text
+  ipAddress       String?
+  deviceType      String?
+  browser         String?
+  operatingSystem String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// =============================================
+// Login History - Track user login attempts
+// =============================================
+model LoginHistory {
+  id     String  @id @default(uuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Login Details
+  success   Boolean
+  ipAddress String?
+  userAgent String? @db.Text
+  location  String?
+
+  // Device Information
+  deviceType      String?
+  browser         String?
+  operatingSystem String?
+
+  // Failure Information
+  failureReason String?
+
+  // Timestamp
+  loginAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([loginAt])
+  @@index([success])
+  @@map("login_history")
+}
+
+// =============================================
+// Admin Activity Log - Track admin actions
+// =============================================
+model AdminActivityLog {
+  id      String @id @default(uuid())
+  adminId String // Reference to User with ADMIN role
+
+  // Action Details
+  action   AdminAction
+  entity   String // e.g., "User", "Product", "Order"
+  entityId String? // ID of the affected entity
+
+  // Details
+  description String @db.Text
+  metadata    Json? // Additional data about the action
+
+  // Request Information
+  ipAddress String?
+  userAgent String? @db.Text
+
+  // Timestamp
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
+  @@index([action])
+  @@index([entity])
+  @@index([createdAt])
+  @@map("admin_activity_logs")
+}
+
+// =============================================
+// Password Reset Token
+// =============================================
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+// =============================================
+// Email Verification Token
+// =============================================
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("email_verification_tokens")
+}
+
+// =============================================
+// Enums
+// =============================================
+
+enum UserRole {
+  CUSTOMER // Regular user
+  ADMIN // Full admin access
+  SUPER_ADMIN // Super admin with all permissions
+  MODERATOR // Limited admin access
+}
+
+enum UserStatus {
+  ACTIVE // Account is active
+  INACTIVE // Account is temporarily inactive
+  SUSPENDED // Account is suspended by admin
+  BANNED // Account is permanently banned
+  PENDING // Account pending verification
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum Language {
+  AR // Arabic
+  EN // English
+  FR // French
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  AUTO
+}
+
+enum ProfileVisibility {
+  PUBLIC
+  PRIVATE
+  FRIENDS_ONLY
+}
+
+enum AdminAction {
+  CREATE
+  UPDATE
+  DELETE
+  VIEW
+  APPROVE
+  REJECT
+  SUSPEND
+  ACTIVATE
+  EXPORT
+  IMPORT
+  CONFIGURE
+  LOGIN
+  LOGOUT
+}
